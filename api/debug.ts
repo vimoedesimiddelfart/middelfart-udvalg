@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }, (res) => {
         let body = '';
         res.on('data', (c) => body += c);
-        res.on('end', () => resolve(`status=${res.statusCode} len=${body.length} first100=${body.substring(0, 100)}`));
+        res.on('end', () => resolve(`status=${res.statusCode} location=${res.headers.location || 'none'} len=${body.length} first100=${body.substring(0, 100)}`));
       });
       req.on('error', (e) => reject(e));
       req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
