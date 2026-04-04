@@ -2,7 +2,11 @@
   "name": "middelfart-udvalg",
   "private": true,
   "dependencies": {
-    "@vercel/kv": "^2.0.0",
-    "@anthropic-ai/sdk": "^0.39.0"
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@vercel/kv": "^2.0.0"
+  },
+  "devDependencies": {
+    "@vercel/node": "^5.7.0",
+    "typescript": "^6.0.2"
   }
 }
