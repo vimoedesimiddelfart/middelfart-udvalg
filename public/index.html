@@ -84,12 +84,9 @@
           <label class="text-xs font-medium text-stone-500 mb-1 block">Status</label>
           <select id="filter-status" onchange="applyFilters()" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">
             <option value="">Alle</option>
-            <option value="overvåg">Overvåg</option>
-            <option value="afklar">Afklar</option>
-            <option value="reager">Reager</option>
-            <option value="foreslå møde">Foreslå møde</option>
-            <option value="lever input">Lever input</option>
-            <option value="ingen handling">Ingen handling</option>
+            <option value="ubehandlet">Ubehandlet</option>
+            <option value="under behandling">Under behandling</option>
+            <option value="behandlet">Behandlet</option>
           </select>
         </div>
       </div>
@@ -369,15 +366,12 @@
       const harCheckin = s.tjekket_ind_af && s.tjekket_ind_af.trim();
       const dato = s.møde_dato || '';
       const kategori = s.kategori || 'uklassificeret';
-      const status = s.status || 'overvåg';
+      const status = s.status || 'ubehandlet';
 
       const statusFarver = {
-        'overvåg': 'bg-blue-100 text-blue-700',
-        'afklar': 'bg-amber-100 text-amber-700',
-        'reager': 'bg-red-100 text-red-700',
-        'foreslå møde': 'bg-purple-100 text-purple-700',
-        'lever input': 'bg-teal-100 text-teal-700',
-        'ingen handling': 'bg-stone-100 text-stone-500'
+        'ubehandlet': 'bg-amber-100 text-amber-700',
+        'under behandling': 'bg-blue-100 text-blue-700',
+        'behandlet': 'bg-green-100 text-green-700',
       };
       const statusClass = statusFarver[status] || 'bg-stone-100 text-stone-500';
 
@@ -416,7 +410,7 @@
             <button onclick='abnCheckin("${s.id}")' class="px-3 py-1.5 rounded-lg bg-teal-700 text-white text-sm hover:bg-teal-800 transition">Tjek ind</button>
             <a href="${s.kilde_url}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-stone-200 text-stone-700 text-sm hover:bg-stone-300 transition inline-block">Åbn mødeside</a>
             <select onchange="opdaterStatus('${s.id}', this.value)" class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm">
-              ${['overvåg','afklar','reager','foreslå møde','lever input','ingen handling'].map(st =>
+              ${['ubehandlet','under behandling','behandlet'].map(st =>
                 `<option value="${st}" ${status === st ? 'selected' : ''}>${st}</option>`
               ).join('')}
             </select>
