@@ -16,42 +16,79 @@ const RELEVANTE_UDVALG = [
   'Byrådet',
 ];
 
-function fetchFA(path: string): Promise<any> {
+// Cookie jar shared across requests for session persistence
+let sessionCookies: string[] = [];
+
+function httpsRequest(url: string, cookies: string[] = []): Promise<{ statusCode: number; headers: any; body: string }> {
   return new Promise((resolve, reject) => {
-    const url = `${FA_BASE}${path}`;
-    const req = https.get(url, { rejectUnauthorized: false }, (res) => {
-      // Follow redirects
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        https.get(res.headers.location, { rejectUnauthorized: false }, (res2) => {
-          collectBody(res2, path).then(resolve).catch(reject);
-        }).on('error', (e) => reject(new Error(`Redirect ${path}: ${e.message}`)));
-        return;
-      }
-      collectBody(res, path).then(resolve).catch(reject);
+    const parsedUrl = new URL(url);
+    const options: https.RequestOptions = {
+      hostname: parsedUrl.hostname,
+      path: parsedUrl.pathname + parsedUrl.search,
+      rejectUnauthorized: false,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json, text/html, */*',
+        ...(cookies.length > 0 ? { 'Cookie': cookies.join('; ') } : {}),
+      },
+    };
+    const req = https.get(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode || 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf-8'),
+        });
+      });
     });
-    req.on('error', (e) => reject(new Error(`FirstAgenda ${path}: ${e.message}`)));
-    req.setTimeout(50000, () => { req.destroy(); reject(new Error(`Timeout ${path}`)); });
+    req.on('error', (e) => reject(e));
+    req.setTimeout(25000, () => { req.destroy(); reject(new Error(`Timeout: ${url}`)); });
   });
 }
 
-function collectBody(res: any, path: string): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    res.on('data', (chunk: Buffer) => chunks.push(chunk));
-    res.on('end', () => {
-      const data = Buffer.concat(chunks).toString('utf-8');
-      if (!data) {
-        reject(new Error(`Empty response for ${path} (status: ${res.statusCode})`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(data));
-      } catch (e) {
-        reject(new Error(`JSON parse error for ${path} (status: ${res.statusCode}): ${data.substring(0, 200)}`));
-      }
-    });
-    res.on('error', (e: Error) => reject(new Error(`Stream error ${path}: ${e.message}`)));
-  });
+function extractCookies(headers: any): string[] {
+  const setCookie = headers['set-cookie'];
+  if (!setCookie) return [];
+  return (Array.isArray(setCookie) ? setCookie : [setCookie]).map(
+    (c: string) => c.split(';')[0]
+  );
+}
+
+async function fetchFA(path: string): Promise<any> {
+  const url = `${FA_BASE}${path}`;
+
+  // First attempt with existing cookies
+  let resp = await httpsRequest(url, sessionCookies);
+
+  // Handle authentication redirect chain
+  let maxRedirects = 5;
+  while (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location && maxRedirects-- > 0) {
+    // Collect cookies from each redirect
+    const newCookies = extractCookies(resp.headers);
+    sessionCookies.push(...newCookies);
+
+    let redirectUrl = resp.headers.location;
+    if (redirectUrl.startsWith('/')) {
+      redirectUrl = `${FA_BASE}${redirectUrl}`;
+    }
+    resp = await httpsRequest(redirectUrl, sessionCookies);
+  }
+
+  // Collect final cookies
+  const finalCookies = extractCookies(resp.headers);
+  sessionCookies.push(...finalCookies);
+
+  if (!resp.body) {
+    throw new Error(`Empty response for ${path} (status: ${resp.statusCode})`);
+  }
+
+  try {
+    return JSON.parse(resp.body);
+  } catch {
+    throw new Error(`JSON parse error for ${path} (status: ${resp.statusCode}): ${resp.body.substring(0, 200)}`);
+  }
 }
 
 function stripHtml(html: string): string {
