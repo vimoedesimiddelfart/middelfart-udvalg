@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
+import { kvGet, kvSet } from './_kv';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();
@@ -21,13 +21,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   for (const sag of sager) {
     // Tjek KV cache
-    try {
-      const cached = await kv.get<any>(`sag:${sag.id}`);
-      if (cached?.relevans_score) {
-        results.push({ id: sag.id, ...cached });
-        continue;
-      }
-    } catch {}
+    const cached = await kvGet<any>(`sag:${sag.id}`);
+    if (cached?.relevans_score) {
+      results.push({ id: sag.id, ...cached });
+      continue;
+    }
 
     // Klassificér med Claude
     try {
@@ -66,9 +64,7 @@ Svar KUN med valid JSON:
         };
 
         // Gem i KV
-        try {
-          await kv.set(`sag:${sag.id}`, sagData, { ex: 90 * 24 * 60 * 60 }); // 90 dage TTL
-        } catch {}
+        await kvSet(`sag:${sag.id}`, sagData, 90 * 24 * 60 * 60);
 
         results.push({ id: sag.id, ...sagData });
       }

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
+import { kvGet } from './_kv';
 
 const FA_BASE = 'https://dagsordener.middelfart.dk';
 
@@ -110,12 +110,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 4. Merge med KV-data (klassificering + check-in)
     const sagerMedData = await Promise.all(
       alleSager.map(async (sag) => {
-        try {
-          const cached = await kv.get<any>(`sag:${sag.id}`);
-          if (cached) {
-            return { ...sag, ...cached };
-          }
-        } catch {}
+        const cached = await kvGet<any>(`sag:${sag.id}`);
+        if (cached) return { ...sag, ...cached };
         return sag;
       })
     );

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
+import { kvGet, kvSet } from './_kv';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();
@@ -46,14 +46,8 @@ Hold det kort og handlingsorienteret. Skriv på dansk.`,
       message.content[0].type === 'text' ? message.content[0].text : '';
 
     // Gem i KV
-    try {
-      const existing = (await kv.get<any>(`sag:${sag_id}`)) || {};
-      await kv.set(
-        `sag:${sag_id}`,
-        { ...existing, vores_vinkel: vinkel },
-        { ex: 90 * 24 * 60 * 60 }
-      );
-    } catch {}
+    const existing = (await kvGet<any>(`sag:${sag_id}`)) || {};
+    await kvSet(`sag:${sag_id}`, { ...existing, vores_vinkel: vinkel }, 90 * 24 * 60 * 60);
 
     res.status(200).json({ vores_vinkel: vinkel });
   } catch (e: any) {

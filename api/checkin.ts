@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
+import { kvGet, kvSet } from './_kv';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,7 +13,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!sag_id) return res.status(400).json({ error: 'sag_id required' });
 
   try {
-    const existing = (await kv.get<any>(`sag:${sag_id}`)) || {};
+    const existing = (await kvGet<any>(`sag:${sag_id}`)) || {};
     const updated = {
       ...existing,
       vores_input: vores_input || existing.vores_input || '',
@@ -22,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: status || existing.status || 'afklar',
     };
 
-    await kv.set(`sag:${sag_id}`, updated, { ex: 90 * 24 * 60 * 60 });
+    await kvSet(`sag:${sag_id}`, updated, 90 * 24 * 60 * 60);
     res.status(200).json({ ok: true, data: updated });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
