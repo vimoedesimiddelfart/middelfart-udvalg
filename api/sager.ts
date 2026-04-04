@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import https from 'https';
 import { kvGet } from '../lib/kv';
 
 const FA_BASE = 'https://dagsordener.middelfart.dk';
@@ -15,12 +16,23 @@ const RELEVANTE_UDVALG = [
   'Byrådet',
 ];
 
-async function fetchFA(path: string) {
-  const res = await fetch(`${FA_BASE}${path}`, {
-    headers: { 'User-Agent': 'VisitMiddelfart-Udvalgsmonitor/1.0' },
+function fetchFA(path: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = `${FA_BASE}${path}`;
+    https.get(url, { rejectUnauthorized: false }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error(`JSON parse error for ${path}: ${data.substring(0, 200)}`));
+        }
+      });
+    }).on('error', (e) => {
+      reject(new Error(`FirstAgenda ${path}: ${e.message}`));
+    });
   });
-  if (!res.ok) throw new Error(`FirstAgenda ${path}: ${res.status}`);
-  return res.json();
 }
 
 function stripHtml(html: string): string {
