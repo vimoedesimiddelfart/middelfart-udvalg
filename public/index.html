@@ -164,7 +164,76 @@
     let filteredSager = [];
     let aktivSag = null;
 
+    // ===== CONFIG =====
+    const FA_BASE = 'https://dagsordener.middelfart.dk';
+
     // ===== API =====
+    function stripHtml(html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      return tmp.textContent || tmp.innerText || '';
+    }
+
+    async function hentFraFirstAgenda() {
+      // Hent udvalgsliste
+      const res = await fetch(`${FA_BASE}/api/agenda/udvalgsliste`);
+      const data = await res.json();
+      const udvalg = data.Udvalg || {};
+
+      // Saml møder fra de seneste 90 dage
+      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const meetings = [];
+
+      for (const [gruppe, committees] of Object.entries(udvalg)) {
+        for (const committee of committees) {
+          for (const meeting of (committee.Moeder || [])) {
+            const dato = new Date(meeting.Dato || meeting.MeetingBeginUtc);
+            if (dato >= cutoff) {
+              meetings.push({
+                udvalg: committee.Navn,
+                møde_id: meeting.Id,
+                møde_dato: dato.toISOString().split('T')[0],
+                navn: meeting.Navn,
+              });
+            }
+          }
+        }
+      }
+
+      // Hent dagsordenspunkter (parallelt, max 5 ad gangen)
+      const alleSager = [];
+      for (let i = 0; i < meetings.length; i += 5) {
+        const chunk = meetings.slice(i, i + 5);
+        const results = await Promise.all(chunk.map(async (m) => {
+          try {
+            const dagRes = await fetch(`${FA_BASE}/api/agenda/dagsorden/${m.møde_id}`);
+            const dagData = await dagRes.json();
+            return (dagData.Dagsordenpunkter || []).map(p => {
+              const htmlContent = p.Felter?.[0]?.Html || '';
+              return {
+                id: `${m.møde_id}-${p.Punktnummer || p.Number}`,
+                møde_id: m.møde_id,
+                udvalg: m.udvalg,
+                møde_dato: m.møde_dato,
+                punkt_nr: parseInt(p.Punktnummer || p.Number || '0'),
+                titel: p.Navn || p.Caption || '',
+                indhold: stripHtml(htmlContent).substring(0, 4000),
+                kilde_url: `${FA_BASE}/vis?id=${m.møde_id}`,
+                is_open: p.IsOpen !== false,
+              };
+            });
+          } catch { return []; }
+        }));
+        for (const items of results) alleSager.push(...items);
+      }
+
+      // Filtrer lukkede punkter og trivielle
+      return alleSager.filter(s =>
+        s.is_open && s.titel &&
+        !s.titel.match(/^(Underskriftsside|Gensidig orientering)$/i)
+      );
+    }
+
     async function hentOgKlassificer() {
       const btn = document.getElementById('fetch-btn');
       const loading = document.getElementById('loading');
@@ -178,34 +247,30 @@
       document.getElementById('empty-state').classList.add('hidden');
 
       try {
-        // Trin 1: Hent sager fra FirstAgenda
-        const sagerRes = await fetch('/api/sager');
-        const sagerData = await sagerRes.json();
-        if (!sagerRes.ok) throw new Error(sagerData.error || 'Fejl ved hentning');
+        // Trin 1: Hent sager direkte fra FirstAgenda (browser -> FirstAgenda, CORS OK)
+        alleSager = await hentFraFirstAgenda();
+        loadingText.textContent = `Fandt ${alleSager.length} sager. Klassificerer med AI...`;
 
-        alleSager = sagerData.sager || [];
-
-        // Trin 2: Klassificér uklassificerede sager
+        // Trin 2: Klassificér via Vercel API (browser -> Vercel -> Claude)
         const uklassificerede = alleSager.filter(s => !s.relevans_score);
         if (uklassificerede.length > 0) {
-          loadingText.textContent = `Klassificerer ${uklassificerede.length} sager med AI...`;
-
-          // Send i batches af 10
           for (let i = 0; i < uklassificerede.length; i += 10) {
             const batch = uklassificerede.slice(i, i + 10);
             loadingText.textContent = `Klassificerer sager (${i + 1}-${Math.min(i + 10, uklassificerede.length)} af ${uklassificerede.length})...`;
 
-            const classRes = await fetch('/api/classify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sager: batch })
-            });
-            const classData = await classRes.json();
-
-            // Merge klassificeringer ind i alleSager
-            for (const result of (classData.results || [])) {
-              const sag = alleSager.find(s => s.id === result.id);
-              if (sag) Object.assign(sag, result);
+            try {
+              const classRes = await fetch('/api/classify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sager: batch })
+              });
+              const classData = await classRes.json();
+              for (const result of (classData.results || [])) {
+                const sag = alleSager.find(s => s.id === result.id);
+                if (sag) Object.assign(sag, result);
+              }
+            } catch (e) {
+              console.warn('Klassificering fejlede for batch:', e);
             }
           }
         }
