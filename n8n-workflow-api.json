@@ -1,0 +1,470 @@
+{
+  "name": "Middelfart – Udvalgs-API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "sager",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-sager",
+      "name": "Webhook: Hent Sager",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "sager"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "options": {}
+      },
+      "id": "sheets-read-sager",
+      "name": "Læs Sager fra Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrér baseret på query-params\nconst query = $('Webhook: Hent Sager').first().json.query || {};\nlet sager = $input.all().map(i => i.json);\n\nif (query.udvalg) {\n  sager = sager.filter(s => s.udvalg && s.udvalg.toLowerCase().includes(query.udvalg.toLowerCase()));\n}\nif (query.kategori) {\n  sager = sager.filter(s => s.kategori === query.kategori);\n}\nif (query.min_relevans) {\n  sager = sager.filter(s => parseInt(s.relevans_score) >= parseInt(query.min_relevans));\n}\nif (query.status) {\n  sager = sager.filter(s => s.status === query.status);\n}\n\n// Sortér: højest relevans først, derefter nyeste dato\nsager.sort((a, b) => {\n  const scoreA = parseInt(a.relevans_score) || 0;\n  const scoreB = parseInt(b.relevans_score) || 0;\n  if (scoreB !== scoreA) return scoreB - scoreA;\n  return (b.møde_dato || '').localeCompare(a.møde_dato || '');\n});\n\nreturn [{ json: { sager, total: sager.length } }];"
+      },
+      "id": "filter-sager",
+      "name": "Filtrér & Sortér",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-sager",
+      "name": "Svar: Sager",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "checkin",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-checkin",
+      "name": "Webhook: Check-in",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "checkin"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hent check-in data fra request body\nconst body = $input.first().json.body;\nconst sagId = body.sag_id;\nconst input = body.vores_input;\nconst tjekketIndAf = body.tjekket_ind_af || 'ukendt';\n\nif (!sagId || !input) {\n  return [{ json: { error: 'Mangler sag_id eller vores_input', status: 400 } }];\n}\n\nreturn [{\n  json: {\n    sag_id: sagId,\n    vores_input: input,\n    tjekket_ind_af: tjekketIndAf,\n    tjekket_ind_dato: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-checkin",
+      "name": "Parse Check-in",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "options": {}
+      },
+      "id": "sheets-read-for-update",
+      "name": "Læs Sager for Opdatering",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Find den rigtige række og opdatér\nconst checkin = $('Parse Check-in').first().json;\nconst allRows = $input.all().map(i => i.json);\n\nconst rowIndex = allRows.findIndex(r => r.id === checkin.sag_id);\nif (rowIndex === -1) {\n  return [{ json: { error: 'Sag ikke fundet: ' + checkin.sag_id, status: 404 } }];\n}\n\n// Returner data til opdatering\nreturn [{\n  json: {\n    row_number: rowIndex + 2, // +2 for header-række og 0-indexering\n    sag_id: checkin.sag_id,\n    vores_input: checkin.vores_input,\n    tjekket_ind_af: checkin.tjekket_ind_af,\n    tjekket_ind_dato: checkin.tjekket_ind_dato,\n    status: 'afklar'\n  }\n}];"
+      },
+      "id": "find-row",
+      "name": "Find Række",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.sag_id }}",
+            "vores_input": "={{ $json.vores_input }}",
+            "tjekket_ind_af": "={{ $json.tjekket_ind_af }}",
+            "tjekket_ind_dato": "={{ $json.tjekket_ind_dato }}",
+            "status": "={{ $json.status }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "sheets-update-checkin",
+      "name": "Opdatér Sheets (Check-in)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, besked: 'Check-in gemt for sag ' + $json.sag_id }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-checkin",
+      "name": "Svar: Check-in OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "genskriv",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-genskriv",
+      "name": "Webhook: Genskriv Vinkel",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 600],
+      "webhookId": "genskriv"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $credentials.anthropicApi.apiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 1024,\n  messages: [{\n    role: 'user',\n    content: `Du er rådgiver for VisitMiddelfart. En medarbejder har tjekket ind på en kommunal sag og tilføjet egne data.\n\nSag: ${$json.body.titel}\nUdvalg: ${$json.body.udvalg}\nAI-resumé: ${$json.body.resumé}\n\nMedarbejderens input:\n${$json.body.vores_input}\n\nSkriv et kort internt notat (max 200 ord) med disse tre sektioner:\n1. **Hvad er sagen?** (2-3 sætninger)\n2. **Hvad betyder den for os?** (2-3 sætninger med medarbejderens data)\n3. **Hvilket input kan vi give?** (2-3 konkrete forslag)\n\nSvar direkte med notatet, ingen indledning.`\n  }]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "claude-genskriv",
+      "name": "Claude: Genskriv Vinkel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 600],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude-svar og returner vinkel\nconst aiResponse = $input.first().json;\nconst body = $('Webhook: Genskriv Vinkel').first().json.body;\n\nlet vinkel = '';\ntry {\n  vinkel = aiResponse.content?.[0]?.text || aiResponse.text || 'Kunne ikke generere vinkel';\n} catch (e) {\n  vinkel = 'Fejl ved generering: ' + e.message;\n}\n\nreturn [{\n  json: {\n    sag_id: body.sag_id,\n    vores_vinkel: vinkel,\n    success: true\n  }\n}];"
+      },
+      "id": "parse-vinkel",
+      "name": "Parse Vinkel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 600]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.sag_id }}",
+            "vores_vinkel": "={{ $json.vores_vinkel }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "sheets-update-vinkel",
+      "name": "Gem Vinkel i Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [660, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, vores_vinkel: $json.vores_vinkel }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-vinkel",
+      "name": "Svar: Vinkel",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 600]
+    }
+  ],
+  "connections": {
+    "Webhook: Hent Sager": {
+      "main": [
+        [
+          {
+            "node": "Læs Sager fra Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Læs Sager fra Sheets": {
+      "main": [
+        [
+          {
+            "node": "Filtrér & Sortér",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrér & Sortér": {
+      "main": [
+        [
+          {
+            "node": "Svar: Sager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Check-in": {
+      "main": [
+        [
+          {
+            "node": "Parse Check-in",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Check-in": {
+      "main": [
+        [
+          {
+            "node": "Læs Sager for Opdatering",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Læs Sager for Opdatering": {
+      "main": [
+        [
+          {
+            "node": "Find Række",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Række": {
+      "main": [
+        [
+          {
+            "node": "Opdatér Sheets (Check-in)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opdatér Sheets (Check-in)": {
+      "main": [
+        [
+          {
+            "node": "Svar: Check-in OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Genskriv Vinkel": {
+      "main": [
+        [
+          {
+            "node": "Claude: Genskriv Vinkel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Genskriv Vinkel": {
+      "main": [
+        [
+          {
+            "node": "Parse Vinkel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vinkel": {
+      "main": [
+        [
+          {
+            "node": "Gem Vinkel i Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gem Vinkel i Sheets": {
+      "main": [
+        [
+          {
+            "node": "Svar: Vinkel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Middelfart"
+    }
+  ]
+}

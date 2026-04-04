@@ -1,0 +1,237 @@
+{
+  "name": "Middelfart – Ugentlig Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-weekly",
+      "name": "Mandag kl 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "options": {}
+      },
+      "id": "sheets-read",
+      "name": "Læs Alle Sager",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrér: kun sager fra de sidste 7 dage med relevans >= 3\nconst now = new Date();\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\nconst allItems = $input.all().map(i => i.json);\n\nconst relevant = allItems.filter(s => {\n  const score = parseInt(s.relevans_score) || 0;\n  if (score < 3) return false;\n  \n  // Tjek om sagen er nyere end 7 dage\n  const created = new Date(s.oprettet);\n  return created >= weekAgo;\n});\n\n// Sortér efter relevans (højest først)\nrelevant.sort((a, b) => (parseInt(b.relevans_score) || 0) - (parseInt(a.relevans_score) || 0));\n\nif (relevant.length === 0) {\n  return [{ json: { skip: true, besked: 'Ingen nye relevante sager denne uge.' } }];\n}\n\nreturn [{ json: { skip: false, sager: relevant, antal: relevant.length } }];"
+      },
+      "id": "filter-relevant",
+      "name": "Filtrér Relevante (7 dage, score ≥ 3)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-sager",
+      "name": "Har Relevante Sager?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $credentials.anthropicApi.apiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 2048,\n  messages: [{\n    role: 'user',\n    content: `Du er kommunikationsrådgiver for VisitMiddelfart. Lav en ugentlig briefing-mail i HTML-format.\n\nHer er ${$json.antal} nye relevante kommunale sager fra denne uge:\n\n${$json.sager.map((s, i) => `--- SAG ${i+1} ---\nUdvalg: ${s.udvalg}\nDato: ${s.møde_dato}\nTitel: ${s.titel}\nKategori: ${s.kategori}\nRelevans: ${s.relevans_score}/5\nResumé: ${s.resumé}\nBegrundelse: ${s.relevans_begrundelse}\nAnbefalet handling: ${s.foreslaaet_handling}\n${s.vores_vinkel ? 'Vores vinkel: ' + s.vores_vinkel : ''}\n`).join('\\n')}\n\nLav en HTML-mail med:\n1. Overskrift: \"VisitMiddelfart – Ugentlig politisk briefing\"\n2. Dato for ugen\n3. Et kort overblik (1-2 sætninger)\n4. For hver sag: et kort med titel, udvalg, relevansscore (visuelt), resumé og anbefalet handling\n5. Brug inline CSS, teal (#3a9e8f) som primærfarve, professionelt og læsevenligt\n\nSvar KUN med HTML-koden, ingen forklaring.`\n  }]\n}) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "claude-briefing",
+      "name": "Claude: Generér Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Udtræk HTML fra Claude-svar\nconst aiResponse = $input.first().json;\nlet html = '';\ntry {\n  html = aiResponse.content?.[0]?.text || aiResponse.text || '<p>Kunne ikke generere briefing.</p>';\n  // Fjern eventuelle markdown code blocks\n  html = html.replace(/```html\\n?/g, '').replace(/```\\n?/g, '').trim();\n} catch (e) {\n  html = '<p>Fejl ved generering af briefing: ' + e.message + '</p>';\n}\n\nreturn [{ json: { html, subject: `VisitMiddelfart – Ugentlig politisk briefing (uge ${Math.ceil((new Date().getDate()) / 7)})` } }];"
+      },
+      "id": "parse-briefing",
+      "name": "Parse Briefing HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "sendTo": "henrik@visitmiddelfart.dk",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Briefing Mail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1320, 0],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIAL_ID",
+          "name": "Gmail"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Mandag kl 06:00": {
+      "main": [
+        [
+          {
+            "node": "Læs Alle Sager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Læs Alle Sager": {
+      "main": [
+        [
+          {
+            "node": "Filtrér Relevante (7 dage, score ≥ 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrér Relevante (7 dage, score ≥ 3)": {
+      "main": [
+        [
+          {
+            "node": "Har Relevante Sager?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Har Relevante Sager?": {
+      "main": [
+        [
+          {
+            "node": "Claude: Generér Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Claude: Generér Briefing": {
+      "main": [
+        [
+          {
+            "node": "Parse Briefing HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Briefing HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Briefing Mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Middelfart"
+    }
+  ]
+}

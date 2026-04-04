@@ -1,0 +1,238 @@
+{
+  "name": "Middelfart – Hent Dagsordener",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daglig kl 05:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Kendte udvalg fra Middelfart Kommune\n// Disse IDer bruges til at finde nye møder\nconst committees = [\n  {\n    name: 'Økonomiudvalget',\n    meetings: [\n      { id: 'b0e726fa-1955-4e52-a751-0438b68f27bd', date: '2026-03-23' },\n      { id: '2923c671-65f8-4678-87c4-729882b2baa4', date: '2026-02-22' }\n    ]\n  },\n  {\n    name: 'Teknisk Udvalg',\n    meetings: [\n      { id: '51cb8f11-a4c1-4e70-ab50-9fc67e3bd83f', date: '2026-03-09' },\n      { id: 'a331bbc5-5d80-4981-8fe5-3f5bf527a520', date: '2026-02-16' }\n    ]\n  },\n  {\n    name: 'Beskæftigelses- og Arbejdsmarkedsudvalget',\n    meetings: [\n      { id: 'e7f06447-4f8b-47cd-9566-d6255a2ab419', date: '2026-04-09' },\n      { id: '0cd691ad-4a66-49aa-8dcd-c4defd0c2dd7', date: '2026-03-04' }\n    ]\n  },\n  {\n    name: 'Børn-, Kultur- og Fritidsudvalget',\n    meetings: []\n  },\n  {\n    name: 'Klima-, Natur- og Genbrugsudvalget',\n    meetings: []\n  },\n  {\n    name: 'Distriktsudvalget',\n    meetings: []\n  }\n];\n\n// Lav én item pr. møde\nconst items = [];\nfor (const c of committees) {\n  for (const m of c.meetings) {\n    items.push({\n      json: {\n        udvalg: c.name,\n        møde_id: m.id,\n        møde_dato: m.date,\n        api_url: `https://dagsordener.middelfart.dk/api/agenda/dagsorden/${m.id}`,\n        kilde_url: `https://dagsordener.middelfart.dk/vis?id=${m.id}`\n      }\n    });\n  }\n}\n\nreturn items;"
+      },
+      "id": "set-committees",
+      "name": "Kendte Udvalg & Møder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.api_url }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-agenda",
+      "name": "Hent Dagsorden",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Udtræk dagsordenspunkter fra API-response\n// FirstAgenda API returnerer typisk en struktur med Items/AgendaItems\nconst input = $input.first().json;\nconst meta = {\n  udvalg: $('Kendte Udvalg & Møder').first().json.udvalg,\n  møde_id: $('Kendte Udvalg & Møder').first().json.møde_id,\n  møde_dato: $('Kendte Udvalg & Møder').first().json.møde_dato,\n  kilde_url: $('Kendte Udvalg & Møder').first().json.kilde_url\n};\n\n// Forsøg at parse dagsordenspunkter fra forskellige mulige strukturer\nlet items = [];\n\nif (input.Items && Array.isArray(input.Items)) {\n  items = input.Items;\n} else if (input.AgendaItems && Array.isArray(input.AgendaItems)) {\n  items = input.AgendaItems;\n} else if (Array.isArray(input)) {\n  items = input;\n} else {\n  // Hvis strukturen er ukendt, send hele responsen som ét punkt\n  items = [{ Title: 'Fuld dagsorden', Content: JSON.stringify(input).substring(0, 5000) }];\n}\n\nconst result = [];\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  const title = item.Title || item.title || item.Name || item.name || `Punkt ${i + 1}`;\n  const content = item.Content || item.content || item.Description || item.description || item.Text || item.text || '';\n  // Strip HTML tags for cleaner text\n  const cleanContent = typeof content === 'string' ? content.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim() : JSON.stringify(content);\n  \n  result.push({\n    json: {\n      ...meta,\n      punkt_nr: item.Number || item.number || (i + 1),\n      titel: title,\n      indhold: cleanContent.substring(0, 4000), // Begræns til 4000 tegn for AI\n      fuld_indhold: cleanContent\n    }\n  });\n}\n\nreturn result.length > 0 ? result : [{ json: { ...meta, punkt_nr: 0, titel: 'Ingen punkter fundet', indhold: '', fuld_indhold: '' } }];"
+      },
+      "id": "parse-agenda",
+      "name": "Udtræk Punkter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $credentials.anthropicApi.apiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 1024,\n  messages: [{\n    role: 'user',\n    content: `Du er en analytiker for VisitMiddelfart (turismeorganisation). Klassificér dette dagsordenspunkt fra ${$json.udvalg}.\n\nTitel: ${$json.titel}\nIndhold: ${$json.indhold}\n\nSvar KUN med valid JSON (ingen markdown, ingen forklaring):\n{\n  \"kategori\": \"turisme|erhverv|kultur|klima|infrastruktur|bosætning|events|budget|partnerskaber|andet\",\n  \"relevans_score\": <1-5 hvor 5=direkte relevant for turisme/erhverv>,\n  \"resumé\": \"<3-5 linjers resumé af sagen>\",\n  \"relevans_begrundelse\": \"<hvorfor det er relevant/ikke relevant for VisitMiddelfart>\",\n  \"foreslaaet_handling\": \"ingen handling|overvåg|afklar|reager|foreslå møde|lever input\"\n}`\n  }]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "claude-classify",
+      "name": "Claude AI Klassificering",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response og kombiner med mødedata\nconst aiResponse = $input.first().json;\nconst punkt = $('Udtræk Punkter').first().json;\n\nlet classification = {};\ntry {\n  // Claude API returnerer content[0].text\n  const text = aiResponse.content?.[0]?.text || aiResponse.text || JSON.stringify(aiResponse);\n  // Find JSON i svaret\n  const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    classification = JSON.parse(jsonMatch[0]);\n  }\n} catch (e) {\n  classification = {\n    kategori: 'andet',\n    relevans_score: 1,\n    resumé: 'Kunne ikke klassificeres automatisk',\n    relevans_begrundelse: 'AI-fejl: ' + e.message,\n    foreslaaet_handling: 'overvåg'\n  };\n}\n\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    id: `${punkt.møde_id}-${punkt.punkt_nr}`,\n    møde_id: punkt.møde_id,\n    udvalg: punkt.udvalg,\n    møde_dato: punkt.møde_dato,\n    punkt_nr: punkt.punkt_nr,\n    titel: punkt.titel,\n    kategori: classification.kategori || 'andet',\n    relevans_score: classification.relevans_score || 1,\n    resumé: classification.resumé || '',\n    relevans_begrundelse: classification.relevans_begrundelse || '',\n    foreslaaet_handling: classification.foreslaaet_handling || 'overvåg',\n    status: classification.foreslaaet_handling || 'overvåg',\n    vores_input: '',\n    vores_vinkel: '',\n    tjekket_ind_af: '',\n    tjekket_ind_dato: '',\n    kilde_url: punkt.kilde_url,\n    oprettet: now\n  }\n}];"
+      },
+      "id": "combine-result",
+      "name": "Kombiner Resultat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1vu5K3yWkIBlD8cJmo-1gOKXkCuP864Svp2OwWqin9oU"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sager"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "google-sheets",
+      "name": "Gem i Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1320, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Opsummering af hvad der blev hentet\nconst items = $input.all();\nconst summary = {\n  total_punkter: items.length,\n  tidspunkt: new Date().toISOString(),\n  besked: `${items.length} dagsordenspunkter hentet og klassificeret.`\n};\nreturn [{ json: summary }];"
+      },
+      "id": "summary",
+      "name": "Opsummering",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 0]
+    }
+  ],
+  "connections": {
+    "Daglig kl 05:00": {
+      "main": [
+        [
+          {
+            "node": "Kendte Udvalg & Møder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kendte Udvalg & Møder": {
+      "main": [
+        [
+          {
+            "node": "Hent Dagsorden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hent Dagsorden": {
+      "main": [
+        [
+          {
+            "node": "Udtræk Punkter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Udtræk Punkter": {
+      "main": [
+        [
+          {
+            "node": "Claude AI Klassificering",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude AI Klassificering": {
+      "main": [
+        [
+          {
+            "node": "Kombiner Resultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kombiner Resultat": {
+      "main": [
+        [
+          {
+            "node": "Gem i Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gem i Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Opsummering",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Middelfart"
+    }
+  ]
+}
