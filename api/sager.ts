@@ -16,7 +16,7 @@ const RELEVANTE_UDVALG = [
   'Byrådet',
 ];
 
-// Cookie jar shared across requests for session persistence
+// Cookie jar - reset per invocation
 let sessionCookies: string[] = [];
 
 function httpsRequest(url: string, cookies: string[] = []): Promise<{ statusCode: number; headers: any; body: string }> {
@@ -108,6 +108,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
   try {
+    // Reset cookies for this invocation
+    sessionCookies = [];
+
     // 1. Hent udvalgsliste
     const data = await fetchFA('/api/agenda/udvalgsliste');
     const udvalg = data.Udvalg || {};
@@ -135,15 +138,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 3. Hent dagsordenspunkter for hvert møde (parallelt, max 5 ad gangen)
+    // 3. Hent dagsordenspunkter for hvert møde (parallelt, max 3 ad gangen for stabilitet)
     const alleSager: any[] = [];
+    let failCount = 0;
 
-    const chunks = [];
-    for (let i = 0; i < meetings.length; i += 5) {
-      chunks.push(meetings.slice(i, i + 5));
-    }
-
-    for (const chunk of chunks) {
+    for (let i = 0; i < meetings.length; i += 3) {
+      const chunk = meetings.slice(i, i + 3);
       const results = await Promise.all(
         chunk.map(async (m) => {
           try {
@@ -165,7 +165,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 is_open: p.IsOpen !== false,
               };
             });
-          } catch {
+          } catch (e: any) {
+            failCount++;
+            console.error(`Failed to fetch meeting ${m.møde_id}:`, e.message);
             return [];
           }
         })
@@ -174,6 +176,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         alleSager.push(...items);
       }
     }
+
+    console.log(`Fetched ${alleSager.length} agenda items from ${meetings.length} meetings (${failCount} failed)`);
 
     // 4. Merge med KV-data (klassificering + check-in)
     const sagerMedData = await Promise.all(

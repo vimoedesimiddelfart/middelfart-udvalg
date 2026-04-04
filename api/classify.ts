@@ -59,7 +59,7 @@ Svar KUN med valid JSON:
         const classification = JSON.parse(jsonMatch[0]);
         const sagData = {
           ...classification,
-          status: classification.foreslaaet_handling || 'overvåg',
+          status: 'ubehandlet',
           klassificeret: new Date().toISOString(),
         };
 
