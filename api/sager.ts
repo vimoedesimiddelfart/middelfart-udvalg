@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import https from 'https';
-import { kvGet } from '../lib/kv';
+import { kvGet, kvSet } from '../lib/kv';
 
 const FA_BASE = 'https://dagsordener.middelfart.dk';
 
@@ -108,6 +108,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
   try {
+    const forceRefresh = req.query.refresh === '1';
+
+    // Tjek cache først (sager-listen caches i 1 time)
+    if (!forceRefresh) {
+      const cached = await kvGet<any>('sager:liste');
+      if (cached) {
+        // Merge med individuelle sag-data (klassificering, check-in)
+        const sagerMedData = await Promise.all(
+          cached.map(async (sag: any) => {
+            const sagData = await kvGet<any>(`sag:${sag.id}`);
+            if (sagData) return { ...sag, ...sagData };
+            return sag;
+          })
+        );
+        return res.status(200).json({ sager: sagerMedData, antal_møder: cached.length, fra_cache: true });
+      }
+    }
+
     // Reset cookies for this invocation
     sessionCookies = [];
 
@@ -197,6 +215,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (scoreB !== scoreA) return scoreB - scoreA;
         return (b.møde_dato || '').localeCompare(a.møde_dato || '');
       });
+
+    // Cache sagslisten i 1 time
+    await kvSet('sager:liste', openSager, 3600);
 
     res.status(200).json({ sager: openSager, antal_møder: meetings.length });
   } catch (e: any) {

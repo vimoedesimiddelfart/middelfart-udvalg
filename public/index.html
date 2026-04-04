@@ -39,8 +39,11 @@
           <p class="text-stone-500">Middelfart Kommune – politisk radar for VisitMiddelfart</p>
         </div>
         <div class="flex gap-2">
-          <button onclick="hentOgKlassificer()" id="fetch-btn" class="px-4 py-2 rounded-lg bg-teal-700 text-white text-sm hover:bg-teal-800 transition">
+          <button onclick="hentOgKlassificer(false)" id="fetch-btn" class="px-4 py-2 rounded-lg bg-teal-700 text-white text-sm hover:bg-teal-800 transition">
             Hent dagsordener
+          </button>
+          <button onclick="hentOgKlassificer(true)" id="refresh-btn" class="px-4 py-2 rounded-lg bg-stone-200 text-stone-700 text-sm hover:bg-stone-300 transition">
+            Opdatér fra FirstAgenda
           </button>
         </div>
       </div>
@@ -162,7 +165,7 @@
     let aktivSag = null;
 
     // ===== API =====
-    async function hentOgKlassificer() {
+    async function hentOgKlassificer(forceRefresh = false) {
       const btn = document.getElementById('fetch-btn');
       const loading = document.getElementById('loading');
       const loadingText = document.getElementById('loading-text');
@@ -176,7 +179,7 @@
 
       try {
         // Trin 1: Hent sager via Vercel API (Vercel -> FirstAgenda)
-        const sagerRes = await fetch('/api/sager');
+        const sagerRes = await fetch('/api/sager' + (forceRefresh ? '?refresh=1' : ''));
         const sagerData = await sagerRes.json();
         if (sagerData.error) throw new Error(sagerData.error);
         alleSager = sagerData.sager || [];
