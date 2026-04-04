@@ -167,6 +167,13 @@
   </div>
 
   <script>
+    // Migrer gamle statusnavne til nye
+    function normaliserStatus(s) {
+      if (!s || s === 'overvåg' || s === 'ingen handling' || s === 'afklar' || s === 'foreslå møde' || s === 'lever input') return 'ubehandlet';
+      if (s === 'reager') return 'under behandling';
+      return s; // ubehandlet, under behandling, behandlet
+    }
+
     // ===== STATE =====
     let alleSager = [];
     let filteredSager = [];
@@ -320,7 +327,7 @@
         if (udvalg && s.udvalg !== udvalg) return false;
         if (kategori && s.kategori !== kategori) return false;
         if (parseInt(s.relevans_score) < minRelevans) return false;
-        if (status && (s.status || 'ubehandlet') !== status) return false;
+        if (status && normaliserStatus(s.status) !== status) return false;
         return true;
       });
 
@@ -380,7 +387,7 @@
       const harCheckin = s.tjekket_ind_af && s.tjekket_ind_af.trim();
       const dato = s.møde_dato || '';
       const kategori = s.kategori || 'uklassificeret';
-      const status = s.status || 'ubehandlet';
+      const status = normaliserStatus(s.status);
 
       const statusFarver = {
         'ubehandlet': 'bg-amber-100 text-amber-700',
