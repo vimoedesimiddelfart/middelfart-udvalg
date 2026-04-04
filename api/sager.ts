@@ -181,6 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 kilde_url: `https://dagsordener.middelfart.dk/vis?id=${m.møde_id}`,
                 bilag: (p.Bilag || []).map((b: any) => b.Navn).join(', '),
                 is_open: p.IsOpen !== false,
+                afsluttet: m.afsluttet === true,
               };
             });
           } catch (e: any) {

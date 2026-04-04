@@ -51,7 +51,15 @@
 
     <!-- Filtre -->
     <section class="rounded-2xl bg-white border border-stone-200 p-4 mb-6">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div>
+          <label class="text-xs font-medium text-stone-500 mb-1 block">Type</label>
+          <select id="filter-type" onchange="applyFilters()" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">
+            <option value="kommende" selected>Kommende møder (dagsorden)</option>
+            <option value="afholdte">Afholdte møder (referat)</option>
+            <option value="">Alle</option>
+          </select>
+        </div>
         <div>
           <label class="text-xs font-medium text-stone-500 mb-1 block">Udvalg</label>
           <select id="filter-udvalg" onchange="applyFilters()" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">
@@ -300,12 +308,15 @@
     }
 
     function applyFilters() {
+      const type = document.getElementById('filter-type').value;
       const udvalg = document.getElementById('filter-udvalg').value;
       const kategori = document.getElementById('filter-kategori').value;
       const minRelevans = parseInt(document.getElementById('filter-relevans').value) || 0;
       const status = document.getElementById('filter-status').value;
 
       filteredSager = alleSager.filter(s => {
+        if (type === 'kommende' && s.afsluttet) return false;
+        if (type === 'afholdte' && !s.afsluttet) return false;
         if (udvalg && s.udvalg !== udvalg) return false;
         if (kategori && s.kategori !== kategori) return false;
         if (parseInt(s.relevans_score) < minRelevans) return false;
@@ -391,7 +402,7 @@
           </div>
 
           <h3 class="text-lg font-semibold mb-1">${escHtml(s.titel)}</h3>
-          <p class="text-sm text-stone-500 mb-3">${escHtml(s.udvalg)} – Punkt ${s.punkt_nr}</p>
+          <p class="text-sm text-stone-500 mb-3">${escHtml(s.udvalg)} – Punkt ${s.punkt_nr} – ${s.afsluttet ? 'Afholdt' : '<span class="text-teal-700 font-medium">Kommende</span>'}</p>
 
           ${s.resumé ? `
             <details class="mb-3">
