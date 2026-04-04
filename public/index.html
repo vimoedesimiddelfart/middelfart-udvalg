@@ -320,7 +320,7 @@
         if (udvalg && s.udvalg !== udvalg) return false;
         if (kategori && s.kategori !== kategori) return false;
         if (parseInt(s.relevans_score) < minRelevans) return false;
-        if (status && s.status !== status) return false;
+        if (status && (s.status || 'ubehandlet') !== status) return false;
         return true;
       });
 
