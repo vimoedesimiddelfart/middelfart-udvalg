@@ -30,7 +30,7 @@ function fetchFA(path: string): Promise<any> {
       collectBody(res, path).then(resolve).catch(reject);
     });
     req.on('error', (e) => reject(new Error(`FirstAgenda ${path}: ${e.message}`)));
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error(`Timeout ${path}`)); });
+    req.setTimeout(50000, () => { req.destroy(); reject(new Error(`Timeout ${path}`)); });
   });
 }
 
