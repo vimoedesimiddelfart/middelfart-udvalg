@@ -19,19 +19,38 @@ const RELEVANTE_UDVALG = [
 function fetchFA(path: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const url = `${FA_BASE}${path}`;
-    https.get(url, { rejectUnauthorized: false }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch (e) {
-          reject(new Error(`JSON parse error for ${path}: ${data.substring(0, 200)}`));
-        }
-      });
-    }).on('error', (e) => {
-      reject(new Error(`FirstAgenda ${path}: ${e.message}`));
+    const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+      // Follow redirects
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        https.get(res.headers.location, { rejectUnauthorized: false }, (res2) => {
+          collectBody(res2, path).then(resolve).catch(reject);
+        }).on('error', (e) => reject(new Error(`Redirect ${path}: ${e.message}`)));
+        return;
+      }
+      collectBody(res, path).then(resolve).catch(reject);
     });
+    req.on('error', (e) => reject(new Error(`FirstAgenda ${path}: ${e.message}`)));
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error(`Timeout ${path}`)); });
+  });
+}
+
+function collectBody(res: any, path: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk: Buffer) => chunks.push(chunk));
+    res.on('end', () => {
+      const data = Buffer.concat(chunks).toString('utf-8');
+      if (!data) {
+        reject(new Error(`Empty response for ${path} (status: ${res.statusCode})`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        reject(new Error(`JSON parse error for ${path} (status: ${res.statusCode}): ${data.substring(0, 200)}`));
+      }
+    });
+    res.on('error', (e: Error) => reject(new Error(`Stream error ${path}: ${e.message}`)));
   });
 }
 
