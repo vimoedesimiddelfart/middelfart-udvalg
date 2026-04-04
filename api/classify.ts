@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kvGet, kvSet } from './_kv';
+import { kvGet, kvSet } from '../lib/kv';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();

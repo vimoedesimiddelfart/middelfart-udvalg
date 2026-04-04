@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kvGet } from './_kv';
+import { kvGet } from '../lib/kv';
 
 const FA_BASE = 'https://dagsordener.middelfart.dk';
 
