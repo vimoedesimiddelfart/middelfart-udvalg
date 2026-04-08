@@ -217,8 +217,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return (b.møde_dato || '').localeCompare(a.møde_dato || '');
       });
 
-    // Cache sagslisten i 1 time
-    await kvSet('sager:liste', openSager, 3600);
+    // Cache sagslisten i 24 timer
+    await kvSet('sager:liste', openSager, 86400);
 
     res.status(200).json({ sager: openSager, antal_møder: meetings.length });
   } catch (e: any) {
