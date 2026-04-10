@@ -4,3 +4,4 @@ node_modules/
 frontpage.html
 
 .vercel
+.env*.local
