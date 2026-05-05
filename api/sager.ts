@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import https from 'https';
 import { kvGet, kvSet } from '../lib/kv';
+import { checkAuth } from '../lib/auth';
 
 const FA_BASE = 'https://dagsordener.middelfart.dk';
 
@@ -25,7 +26,6 @@ function httpsRequest(url: string, cookies: string[] = []): Promise<{ statusCode
     const options: https.RequestOptions = {
       hostname: parsedUrl.hostname,
       path: parsedUrl.pathname + parsedUrl.search,
-      rejectUnauthorized: false,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/html, */*',
@@ -105,7 +105,10 @@ function stripHtml(html: string): string {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Access-Token');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (!checkAuth(req, res)) return;
 
   try {
     const forceRefresh = req.query.refresh === '1';

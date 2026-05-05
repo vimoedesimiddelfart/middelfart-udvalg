@@ -181,7 +181,65 @@
     </div>
   </div>
 
+  <!-- Login gate -->
+  <div id="login-gate" class="fixed inset-0 bg-brand-bg z-[100] flex items-center justify-center">
+    <div class="bg-brand-card rounded-2xl border border-brand-border p-8 max-w-sm w-full mx-4 shadow-lg">
+      <h2 class="text-xl font-semibold text-brand-dark mb-2">Adgang påkrævet</h2>
+      <p class="text-sm text-brand-muted mb-6">Indtast adgangskode for at fortsætte.</p>
+      <input id="login-password" type="password" placeholder="Adgangskode" class="w-full rounded-lg border border-brand-border px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-brand-accent focus:border-transparent" onkeydown="if(event.key==='Enter')doLogin()" />
+      <p id="login-error" class="text-sm text-brand-danger mb-3 hidden">Forkert adgangskode</p>
+      <button onclick="doLogin()" class="w-full px-4 py-2 rounded-lg bg-brand-accent text-white text-sm hover:bg-brand-accent-dark transition">Log ind</button>
+    </div>
+  </div>
+
   <script>
+    // ===== AUTH =====
+    let accessToken = localStorage.getItem('access_token') || '';
+
+    function doLogin() {
+      const pw = document.getElementById('login-password').value;
+      if (!pw.trim()) return;
+      accessToken = pw;
+      // Test with a simple API call
+      fetch('/api/sager', { headers: { 'X-Access-Token': accessToken } })
+        .then(r => {
+          if (r.status === 401) {
+            document.getElementById('login-error').classList.remove('hidden');
+            return;
+          }
+          localStorage.setItem('access_token', accessToken);
+          document.getElementById('login-gate').classList.add('hidden');
+          loadCachedSager();
+        })
+        .catch(() => {
+          // Network error but token might be correct, let them in
+          localStorage.setItem('access_token', accessToken);
+          document.getElementById('login-gate').classList.add('hidden');
+          loadCachedSager();
+        });
+    }
+
+    // Check stored token on load
+    if (accessToken) {
+      fetch('/api/sager', { headers: { 'X-Access-Token': accessToken } })
+        .then(r => {
+          if (r.status !== 401) {
+            document.getElementById('login-gate').classList.add('hidden');
+            loadCachedSager();
+          } else {
+            localStorage.removeItem('access_token');
+            accessToken = '';
+          }
+        })
+        .catch(() => {
+          document.getElementById('login-gate').classList.add('hidden');
+        });
+    }
+
+    function authHeaders() {
+      return { 'Content-Type': 'application/json', 'X-Access-Token': accessToken };
+    }
+
     // Migrer gamle statusnavne til nye
     function normaliserStatus(s) {
       if (!s || s === 'overvåg' || s === 'ingen handling' || s === 'afklar' || s === 'foreslå møde' || s === 'lever input') return 'ubehandlet';
@@ -209,7 +267,7 @@
 
       try {
         // Trin 1: Hent sager via Vercel API (Vercel -> FirstAgenda)
-        const sagerRes = await fetch('/api/sager' + (forceRefresh ? '?refresh=1' : ''));
+        const sagerRes = await fetch('/api/sager' + (forceRefresh ? '?refresh=1' : ''), { headers: { 'X-Access-Token': accessToken } });
         const sagerData = await sagerRes.json();
         if (sagerData.error) throw new Error(sagerData.error);
         alleSager = sagerData.sager || [];
@@ -225,7 +283,7 @@
             try {
               const classRes = await fetch('/api/classify', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ sager: batch })
               });
               const classData = await classRes.json();
@@ -239,6 +297,8 @@
           }
         }
 
+        localStorage.setItem('cached_sager', JSON.stringify(alleSager));
+        localStorage.setItem('cached_sager_time', new Date().toISOString());
         populateUdvalgFilter();
         applyFilters();
 
@@ -254,6 +314,21 @@
       }
     }
 
+    function loadCachedSager() {
+      const cached = localStorage.getItem('cached_sager');
+      if (!cached) return;
+      try {
+        alleSager = JSON.parse(cached);
+        const time = localStorage.getItem('cached_sager_time');
+        const label = time ? new Date(time).toLocaleString('da-DK') : '';
+        document.getElementById('empty-state').classList.add('hidden');
+        populateUdvalgFilter();
+        applyFilters();
+        const btn = document.getElementById('fetch-btn');
+        btn.textContent = label ? `Opdatér (sidst: ${label})` : 'Opdatér';
+      } catch (e) { console.warn('Cache parse fejl:', e); }
+    }
+
     async function gemCheckin() {
       if (!aktivSag) return;
       const input = document.getElementById('modal-input').value;
@@ -264,7 +339,7 @@
       try {
         await fetch('/api/checkin', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body: JSON.stringify({
             sag_id: aktivSag.id,
             vores_input: input,
@@ -294,7 +369,7 @@
       try {
         const res = await fetch('/api/genskriv', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body: JSON.stringify({
             sag_id: aktivSag.id,
             titel: aktivSag.titel,
@@ -489,7 +564,7 @@
         sag.status = nyStatus;
         fetch('/api/checkin', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body: JSON.stringify({
             sag_id: sagId,
             vores_input: sag.vores_input || '',
